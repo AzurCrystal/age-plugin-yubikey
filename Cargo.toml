@@ -31,6 +31,8 @@ dialoguer = { version = "0.11", default-features = false, features = ["password"
 env_logger = "0.10"
 gumdrop = "0.8"
 hex = "0.4"
+hkdf = "0.12"
+hpke = { version = "0.12", default-features = false, features = ["alloc", "p256"] }
 log = "0.4"
 p256 = { version = "0.13", features = ["ecdh"] }
 pcsc = "2.4"
@@ -56,3 +58,7 @@ man = "0.3"
 tempfile = "3"
 test-with = "0.11"
 which = "5"
+
+[patch.crates-io]
+age-core = { git = "https://github.com/str4d/rage.git", rev = "cf04ea79ab74f4fdbfbe5b4ed7d0fb72c9c1da4d" }
+age-plugin = { git = "https://github.com/str4d/rage.git", rev = "cf04ea79ab74f4fdbfbe5b4ed7d0fb72c9c1da4d" }

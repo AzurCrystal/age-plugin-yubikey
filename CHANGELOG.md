@@ -8,6 +8,12 @@ to 0.3.0 are beta releases.
 
 ## [Unreleased]
 
+### Added
+- Support for the native non-hybrid tagged recipient type (`age1tag1..`).
+  - Encryption requires making the `age-plugin-yubikey` binary available on the
+    `PATH` as `age-plugin-tag`, or upgrading to a client version that builds in
+    support for this new native recipient type.
+
 ### Changed
 - MSRV is now 1.70.0.
 

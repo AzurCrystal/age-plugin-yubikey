@@ -637,6 +637,10 @@ impl Connection {
         &self.pk
     }
 
+    pub(crate) fn stub(&self) -> Stub {
+        Stub::new(self.yubikey.serial(), self.slot, &self.pk)
+    }
+
     pub(crate) fn request_pin_if_necessary<E>(
         &mut self,
         callbacks: &mut dyn Callbacks<E>,

@@ -138,7 +138,10 @@ impl Recipient {
 
 impl RecipientLine {
     pub(crate) fn unwrap_file_key(&self, conn: &mut Connection) -> Result<FileKey, ()> {
-        let crate::recipient::Recipient::PivP256(recipient) = conn.recipient();
+        let recipient = match conn.recipient() {
+            crate::recipient::Recipient::PivP256(recipient) => recipient,
+            _ => panic!("should have been filtered out earlier"),
+        };
         assert_eq!(self.tag, recipient.tag());
 
         let salt = salt(&self.epk_bytes, recipient);
