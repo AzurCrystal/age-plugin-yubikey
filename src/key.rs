@@ -21,7 +21,7 @@ use yubikey::{
 use crate::{
     error::Error,
     fl,
-    native::p256tag,
+    native::{mlkem768p256tag, p256tag},
     recipient::TAG_BYTES,
     util::{otp_serial_prefix, Metadata},
     Recipient, IDENTITY_PREFIX,
@@ -384,6 +384,17 @@ pub(crate) fn manage(yubikey: &mut YubiKey) -> Result<(), Error> {
     Ok(())
 }
 
+/// Parses the certificate to identify the preferred recipient type it corresponds to.
+pub(crate) fn identify_recipient(
+    cert: &Certificate,
+) -> Option<(Recipient, Option<mlkem768p256tag::PqPrivateKey>)> {
+    mlkem768p256tag::Recipient::from_certificate(cert)
+        .map(|(recipient, dk_pq)| (Recipient::MlKem768P256Tag(recipient), Some(dk_pq)))
+        .or_else(|| {
+            p256tag::Recipient::from_certificate(cert).map(|pk| (Recipient::P256Tag(pk), None))
+        })
+}
+
 /// Returns an iterator of keys that are occupying plugin-compatible slots, along with the
 /// corresponding recipient if the key is compatible with this plugin.
 pub(crate) fn list_slots(
@@ -393,9 +404,8 @@ pub(crate) fn list_slots(
         // We only use the retired slots.
         match key.slot() {
             SlotId::Retired(slot) => {
-                // Only P-256 keys are compatible with us.
                 let recipient =
-                    p256tag::Recipient::from_certificate(key.certificate()).map(Recipient::P256Tag);
+                    identify_recipient(key.certificate()).map(|(recipient, _)| recipient);
                 Some((key, slot, recipient))
             }
             _ => None,
@@ -595,22 +605,23 @@ impl Stub {
         };
 
         // Read the pubkey from the YubiKey slot and check it still matches.
-        let (cert, pk) = match Certificate::read(&mut yubikey, SlotId::Retired(self.slot))
-            .ok()
-            .and_then(|cert| {
-                // Parse as the preferred recipient for each identity type.
-                p256tag::Recipient::from_certificate(&cert)
-                    .filter(|pk| pk.static_tag() == self.tag)
-                    .map(|pk| (cert, Recipient::P256Tag(pk)))
-            }) {
-            Some(pk) => pk,
-            None => {
-                return Ok(Err(identity::Error::Identity {
-                    index: self.identity_index,
-                    message: fl!("plugin-err-yk-stub-mismatch"),
-                }))
-            }
-        };
+        let (cert, (pk, ml_kem_768_dk)) =
+            match Certificate::read(&mut yubikey, SlotId::Retired(self.slot))
+                .ok()
+                .and_then(|cert| {
+                    // Parse as the preferred recipient for each identity type.
+                    identify_recipient(&cert)
+                        .filter(|(recipient, _)| recipient.static_tag() == self.tag)
+                        .map(|r| (cert, r))
+                }) {
+                Some(pk) => pk,
+                None => {
+                    return Ok(Err(identity::Error::Identity {
+                        index: self.identity_index,
+                        message: fl!("plugin-err-yk-stub-mismatch"),
+                    }))
+                }
+            };
 
         Ok(Ok(Some(Connection {
             yubikey,
@@ -618,6 +629,7 @@ impl Stub {
             pk,
             slot: self.slot,
             identity_index: self.identity_index,
+            ml_kem_768_dk,
             cached_metadata: None,
             last_touch: None,
         })))
@@ -630,6 +642,7 @@ pub(crate) struct Connection {
     pk: Recipient,
     slot: RetiredSlotId,
     identity_index: usize,
+    ml_kem_768_dk: Option<mlkem768p256tag::PqPrivateKey>,
     cached_metadata: Option<Metadata>,
     last_touch: Option<Instant>,
 }
@@ -642,6 +655,10 @@ impl Connection {
 
     pub(crate) fn stub(&self) -> Stub {
         Stub::new(self.yubikey.serial(), self.slot, &self.pk)
+    }
+
+    pub(crate) fn ml_kem_768_dk(&self) -> Option<&mlkem768p256tag::PqPrivateKey> {
+        self.ml_kem_768_dk.as_ref()
     }
 
     pub(crate) fn request_pin_if_necessary<E>(

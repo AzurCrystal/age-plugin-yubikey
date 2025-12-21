@@ -172,7 +172,7 @@ impl From<RecipientLine> for Stanza {
 }
 
 impl RecipientLine {
-    pub(crate) fn from_stanza(s: Stanza) -> Option<Result<Self, ()>> {
+    pub(crate) fn from_stanza(s: &Stanza) -> Option<Result<Self, ()>> {
         if s.tag != P256TAG_RECIPIENT_TAG {
             return None;
         }
@@ -190,7 +190,7 @@ impl RecipientLine {
             (Some(tag), Some(epk_bytes)) => Ok(RecipientLine {
                 tag,
                 enc: epk_bytes,
-                ct: s.body,
+                ct: s.body.clone(),
             }),
             // Anything else indicates a structurally-invalid stanza.
             _ => Err(()),
