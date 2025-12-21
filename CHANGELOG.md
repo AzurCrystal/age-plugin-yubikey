@@ -16,6 +16,8 @@ to 0.3.0 are beta releases.
 
 ### Changed
 - MSRV is now 1.70.0.
+- Encryption to an identity now uses the preferred recipient type supported for
+  that identity.
 
 ## [0.5.0] - 2024-08-04
 ### Fixed

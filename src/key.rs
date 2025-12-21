@@ -20,7 +20,9 @@ use yubikey::{
 
 use crate::{
     error::Error,
-    fl, piv_p256,
+    fl,
+    native::p256tag,
+    piv_p256,
     recipient::TAG_BYTES,
     util::{otp_serial_prefix, Metadata},
     Recipient, IDENTITY_PREFIX,
@@ -597,9 +599,10 @@ impl Stub {
         let (cert, pk) = match Certificate::read(&mut yubikey, SlotId::Retired(self.slot))
             .ok()
             .and_then(|cert| {
-                piv_p256::Recipient::from_certificate(&cert)
-                    .filter(|pk| pk.tag() == self.tag)
-                    .map(|pk| (cert, Recipient::PivP256(pk)))
+                // Parse as the preferred recipient for each identity type.
+                p256tag::Recipient::from_certificate(&cert)
+                    .filter(|pk| pk.static_tag() == self.tag)
+                    .map(|pk| (cert, Recipient::P256Tag(pk)))
             }) {
             Some(pk) => pk,
             None => {
@@ -633,6 +636,7 @@ pub(crate) struct Connection {
 }
 
 impl Connection {
+    /// Returns the preferred recipient for encrypting to this identity.
     pub(crate) fn recipient(&self) -> &Recipient {
         &self.pk
     }

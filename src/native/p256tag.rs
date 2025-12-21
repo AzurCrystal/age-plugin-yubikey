@@ -14,6 +14,7 @@ use p256::{
     EncodedPoint,
 };
 use rand::rngs::OsRng;
+use yubikey::{certificate::PublicKeyInfo, Certificate};
 
 use super::{stanza_tag, YubiKeyKemPrivateKey};
 use crate::{
@@ -92,6 +93,33 @@ impl Recipient {
             compressed: encoded,
             pk_recip,
         })
+    }
+
+    pub(crate) fn from_certificate(cert: &Certificate) -> Option<Self> {
+        Self::from_spki(cert.subject_pki())
+    }
+
+    pub(crate) fn from_spki(spki: &PublicKeyInfo) -> Option<Self> {
+        let encoded = match spki {
+            PublicKeyInfo::EcP256(pubkey) => Some(pubkey),
+            _ => None,
+        }?;
+
+        // Check that the certificate encoding is uncompressed.
+        let pk_recip = <Kem as hpke::Kem>::PublicKey::from_bytes(encoded.as_bytes()).ok()?;
+
+        let point = p256::PublicKey::from_encoded_point(encoded).into_option()?;
+        let compressed = point.to_encoded_point(true);
+
+        Some(Self {
+            compressed,
+            pk_recip,
+        })
+    }
+
+    /// Returns the compressed SEC-1 encoding of this recipient.
+    pub(crate) fn to_compressed(&self) -> p256::EncodedPoint {
+        self.compressed
     }
 
     pub(crate) fn static_tag(&self) -> [u8; TAG_BYTES] {

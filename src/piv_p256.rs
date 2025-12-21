@@ -111,7 +111,7 @@ impl Recipient {
 
         let shared_secret = esk.diffie_hellman(self.public_key());
 
-        let salt = salt(&epk_bytes, self);
+        let salt = salt(&epk_bytes, self.to_encoded());
 
         let enc_key = {
             let mut okm = [0; 32];
@@ -138,13 +138,17 @@ impl Recipient {
 
 impl RecipientLine {
     pub(crate) fn unwrap_file_key(&self, conn: &mut Connection) -> Result<FileKey, ()> {
-        let recipient = match conn.recipient() {
-            crate::recipient::Recipient::PivP256(recipient) => recipient,
-            _ => panic!("should have been filtered out earlier"),
+        let (static_tag, pk) = match conn.recipient() {
+            crate::recipient::Recipient::PivP256(recipient) => {
+                (recipient.tag(), recipient.to_encoded())
+            }
+            crate::recipient::Recipient::P256Tag(recipient) => {
+                (recipient.static_tag(), recipient.to_compressed())
+            }
         };
-        assert_eq!(self.tag, recipient.tag());
+        assert_eq!(self.tag, static_tag);
 
-        let salt = salt(&self.epk_bytes, recipient);
+        let salt = salt(&self.epk_bytes, pk);
 
         // The YubiKey API for performing scalar multiplication takes the point in its
         // uncompressed SEC-1 encoding.
@@ -165,9 +169,10 @@ impl RecipientLine {
     }
 }
 
-fn salt(epk_bytes: &EphemeralKeyBytes, pk: &Recipient) -> Vec<u8> {
+fn salt(epk_bytes: &EphemeralKeyBytes, pk: p256::EncodedPoint) -> Vec<u8> {
+    assert!(pk.is_compressed());
     let mut salt = vec![];
     salt.extend_from_slice(epk_bytes.as_bytes());
-    salt.extend_from_slice(pk.to_encoded().as_bytes());
+    salt.extend_from_slice(pk.as_bytes());
     salt
 }
