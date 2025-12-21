@@ -22,7 +22,6 @@ use crate::{
     error::Error,
     fl,
     native::p256tag,
-    piv_p256,
     recipient::TAG_BYTES,
     util::{otp_serial_prefix, Metadata},
     Recipient, IDENTITY_PREFIX,
@@ -395,8 +394,8 @@ pub(crate) fn list_slots(
         match key.slot() {
             SlotId::Retired(slot) => {
                 // Only P-256 keys are compatible with us.
-                let recipient = piv_p256::Recipient::from_certificate(key.certificate())
-                    .map(Recipient::PivP256);
+                let recipient =
+                    p256tag::Recipient::from_certificate(key.certificate()).map(Recipient::P256Tag);
                 Some((key, slot, recipient))
             }
             _ => None,

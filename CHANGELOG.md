@@ -18,6 +18,10 @@ to 0.3.0 are beta releases.
 - MSRV is now 1.70.0.
 - Encryption to an identity now uses the preferred recipient type supported for
   that identity.
+- `age-plugin-yubikey` now prints `age1tag1..` recipients in its CLI and
+  identity files instead of `age1yubikey1..` recipients. The latter is now only
+  shown in comments for identities generated with `age-plugin-yubikey 0.5.0` or
+  earlier.
 
 ## [0.5.0] - 2024-08-04
 ### Fixed

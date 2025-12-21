@@ -3,7 +3,7 @@ use std::fmt;
 use age_core::format::{FileKey, Stanza};
 use sha2::{Digest, Sha256};
 
-use crate::{native::p256tag, piv_p256, PLUGIN_NAME};
+use crate::{native::p256tag, piv_p256, util::Metadata, PLUGIN_NAME};
 
 pub(crate) const TAG_BYTES: usize = 4;
 
@@ -30,6 +30,21 @@ impl Recipient {
             p256tag::PLUGIN_NAME => p256tag::Recipient::from_bytes(bytes).map(Self::P256Tag),
             _ => None,
         }
+    }
+
+    /// Helper for returning the legacy encoding of this recipient, if any.
+    pub(crate) fn legacy_recipient(&self, metadata: &Metadata) -> Option<String> {
+        metadata
+            .is_pre_p256tag()
+            .then(|| match self {
+                Recipient::P256Tag(recipient) => Some(
+                    piv_p256::Recipient::from_bytes(recipient.to_compressed().as_bytes())
+                        .expect("valid")
+                        .to_string(),
+                ),
+                _ => None,
+            })
+            .flatten()
     }
 
     /// Returns the static tag for this recipient.

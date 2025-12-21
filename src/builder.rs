@@ -11,7 +11,7 @@ use crate::{
     error::Error,
     fl,
     key::{self, Stub},
-    piv_p256,
+    native::p256tag,
     util::{Metadata, POLICY_EXTENSION_OID},
     Recipient, BINARY_NAME, USABLE_SLOTS,
 };
@@ -104,8 +104,8 @@ impl IdentityBuilder {
             touch_policy,
         )?;
 
-        let recipient = Recipient::PivP256(
-            piv_p256::Recipient::from_spki(&generated).expect("YubiKey generates a valid pubkey"),
+        let recipient = Recipient::P256Tag(
+            p256tag::Recipient::from_spki(&generated).expect("YubiKey generates a valid pubkey"),
         );
         let stub = Stub::new(yubikey.serial(), slot, &recipient);
 

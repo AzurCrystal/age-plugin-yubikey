@@ -43,6 +43,8 @@ yubikey-metadata =
     #      Created: {$created}
     #   PIN policy: {$pin_policy}
     # Touch policy: {$touch_policy}
+yubikey-legacy-recipient =
+    # Legacy recipient: {$recipient}
 yubikey-identity =
     {$yubikey_metadata}
     #    Recipient: {$recipient}

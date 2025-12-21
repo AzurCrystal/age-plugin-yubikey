@@ -71,7 +71,10 @@ pub(crate) fn otp_serial_prefix(serial: Serial) -> String {
         .collect()
 }
 
-pub(crate) fn extract_name(cert: &X509Certificate, all: bool) -> Option<(String, bool)> {
+pub(crate) fn extract_name_and_version(
+    cert: &X509Certificate,
+    all: bool,
+) -> Option<(String, Option<String>)> {
     // Look at Subject Organization to determine if we created this.
     match cert.subject().iter_organization().next() {
         Some(org) if org.as_str() == Ok(BINARY_NAME) => {
@@ -84,7 +87,16 @@ pub(crate) fn extract_name(cert: &X509Certificate, all: bool) -> Option<(String,
                 .map(|s| s.to_owned())
                 .unwrap_or_default(); // TODO: This should always be present.
 
-            Some((name, true))
+            // We store the binary version as an Organizational Unit attribute.
+            let version = cert
+                .subject()
+                .iter_organizational_unit()
+                .next()
+                .and_then(|cn| cn.as_str().ok())
+                .map(|s| s.to_owned())
+                .unwrap_or_default(); // TODO: This should always be present.
+
+            Some((name, Some(version)))
         }
         _ => {
             // Not one of ours, but we've already filtered for compatibility.
@@ -95,7 +107,7 @@ pub(crate) fn extract_name(cert: &X509Certificate, all: bool) -> Option<(String,
             // Display the entire subject.
             let name = cert.subject().to_string();
 
-            Some((name, false))
+            Some((name, None))
         }
     }
 }
@@ -104,6 +116,7 @@ pub(crate) struct Metadata {
     serial: Serial,
     slot: RetiredSlotId,
     name: String,
+    version: Option<String>,
     created: String,
     pub(crate) pin_policy: Option<PinPolicy>,
     pub(crate) touch_policy: Option<TouchPolicy>,
@@ -149,31 +162,29 @@ impl Metadata {
                 .unwrap_or((None, None))
         };
 
-        extract_name(&cert, all)
-            .map(|(name, ours)| {
-                if ours {
-                    let (pin_policy, touch_policy) = policies(&cert);
-                    (name, pin_policy, touch_policy)
+        extract_name_and_version(&cert, all)
+            .map(|(name, version)| {
+                let (pin_policy, touch_policy) = if version.is_some() {
+                    policies(&cert)
                 } else {
                     // We can extract the PIN and touch policies via an attestation. This
                     // is slow, but the user has asked for all compatible keys, so...
-                    let (pin_policy, touch_policy) =
-                        yubikey::piv::attest(yubikey, SlotId::Retired(slot))
-                            .ok()
-                            .and_then(|buf| {
-                                x509_parser::parse_x509_certificate(&buf)
-                                    .map(|(_, c)| policies(&c))
-                                    .ok()
-                            })
-                            .unwrap_or((None, None));
-
-                    (name, pin_policy, touch_policy)
-                }
+                    yubikey::piv::attest(yubikey, SlotId::Retired(slot))
+                        .ok()
+                        .and_then(|buf| {
+                            x509_parser::parse_x509_certificate(&buf)
+                                .map(|(_, c)| policies(&c))
+                                .ok()
+                        })
+                        .unwrap_or((None, None))
+                };
+                (name, version, pin_policy, touch_policy)
             })
-            .map(|(name, pin_policy, touch_policy)| Metadata {
+            .map(|(name, version, pin_policy, touch_policy)| Metadata {
                 serial: yubikey.serial(),
                 slot,
                 name,
+                version,
                 created: cert
                     .validity()
                     .not_before
@@ -181,6 +192,19 @@ impl Metadata {
                     .unwrap_or_else(|e| format!("Invalid date: {e}")),
                 pin_policy,
                 touch_policy,
+            })
+    }
+
+    /// Returns `true` if this identity was generated with an `age-plugin-yubikey` version
+    /// before `p256tag` was added (and became the default).
+    pub(crate) fn is_pre_p256tag(&self) -> bool {
+        self.version
+            .as_ref()
+            .and_then(|version| version.split_once('.'))
+            .and_then(|(major, rest)| rest.split_once('.').map(|(minor, _)| (major, minor)))
+            .is_some_and(|(major, minor)| {
+                // `p256tag` added in v0.6.0
+                major == "0" && minor.parse::<u8>().is_ok_and(|minor| minor < 6)
             })
     }
 }
@@ -204,11 +228,21 @@ impl fmt::Display for Metadata {
 }
 
 pub(crate) fn print_identity(stub: Stub, recipient: Recipient, metadata: Metadata) {
+    let legacy_recipient = recipient.legacy_recipient(&metadata);
     let recipient = recipient.to_string();
     if !console::user_attended() {
         let recipient = recipient.as_str();
         eprintln!("{}", fl!("print-recipient", recipient = recipient));
     }
+
+    let identity = if let Some(legacy_recipient) = legacy_recipient {
+        format!(
+            "{}\n{stub}",
+            fl!("yubikey-legacy-recipient", recipient = legacy_recipient),
+        )
+    } else {
+        stub.to_string()
+    };
 
     println!(
         "{}",
@@ -216,7 +250,7 @@ pub(crate) fn print_identity(stub: Stub, recipient: Recipient, metadata: Metadat
             "yubikey-identity",
             yubikey_metadata = metadata.to_string(),
             recipient = recipient,
-            identity = stub.to_string(),
+            identity = identity,
         )
     );
 }
