@@ -1,5 +1,6 @@
+use age_core::secrecy::zeroize::Zeroize;
 use dialoguer::Password;
-use rand::{rngs::OsRng, RngCore};
+use rand::{rngs::OsRng, Rng, RngCore};
 use x509::RelativeDistinguishedName;
 use yubikey::{
     certificate::Certificate,
@@ -11,7 +12,7 @@ use crate::{
     error::Error,
     fl,
     key::{self, Stub},
-    native::p256tag,
+    native::{mlkem768p256tag, p256tag},
     util::{Metadata, POLICY_EXTENSION_OID},
     Recipient, BINARY_NAME, USABLE_SLOTS,
 };
@@ -104,8 +105,14 @@ impl IdentityBuilder {
             touch_policy,
         )?;
 
-        let recipient = Recipient::P256Tag(
-            p256tag::Recipient::from_spki(&generated).expect("YubiKey generates a valid pubkey"),
+        // Generate the PQ half of the identity.
+        let mut dk_seed = [0; 64];
+        OsRng.fill(&mut dk_seed);
+        let (_, ek_pq) = mlkem768p256tag::expand_pq_key(&dk_seed);
+
+        let recipient = Recipient::MlKem768P256Tag(
+            mlkem768p256tag::Recipient::from_spki(&generated, ek_pq)
+                .expect("YubiKey generates a valid pubkey"),
         );
         let stub = Stub::new(yubikey.serial(), slot, &recipient);
 
@@ -137,22 +144,29 @@ impl IdentityBuilder {
             eprintln!("{}", fl!("builder-touch-yk"));
         }
 
-        let cert = Certificate::generate_self_signed(
-            yubikey,
-            SlotId::Retired(slot),
-            serial,
-            None,
-            &[
-                RelativeDistinguishedName::organization(BINARY_NAME),
-                RelativeDistinguishedName::organizational_unit(env!("CARGO_PKG_VERSION")),
-                RelativeDistinguishedName::common_name(&name),
-            ],
-            generated,
-            &[x509::Extension::regular(
-                POLICY_EXTENSION_OID,
-                &[pin_policy.into(), touch_policy.into()],
-            )],
-        )?;
+        let cert = mlkem768p256tag::encode_ml_kem_768_seed(&dk_seed, |pq_ext| {
+            Certificate::generate_self_signed(
+                yubikey,
+                SlotId::Retired(slot),
+                serial,
+                None,
+                &[
+                    RelativeDistinguishedName::organization(BINARY_NAME),
+                    RelativeDistinguishedName::organizational_unit(env!("CARGO_PKG_VERSION")),
+                    RelativeDistinguishedName::common_name(&name),
+                ],
+                generated,
+                &[
+                    pq_ext,
+                    x509::Extension::regular(
+                        POLICY_EXTENSION_OID,
+                        &[pin_policy.into(), touch_policy.into()],
+                    ),
+                ],
+            )
+        })?;
+
+        dk_seed.zeroize();
 
         let metadata = Metadata::extract(yubikey, slot, &cert, false).unwrap();
 
