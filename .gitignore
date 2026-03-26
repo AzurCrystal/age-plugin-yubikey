@@ -1,5 +1,6 @@
 # CLion IDE
 .idea
+.direnv
 
 /target
 **/*.rs.bk

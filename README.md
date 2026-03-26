@@ -21,6 +21,21 @@ On Windows, Linux, and macOS, you can use the
 
 Help from new packagers is very welcome.
 
+## Development
+
+This repository includes a Nix flake-based development shell using
+[`fenix`](https://github.com/nix-community/fenix). If you use `direnv`, run:
+
+```console
+$ direnv allow
+```
+
+Otherwise, you can enter the shell directly with:
+
+```console
+$ nix develop
+```
+
 ### Linux, BSD, etc.
 
 On non-Windows, non-macOS systems, you need to ensure that the `pcscd` service
