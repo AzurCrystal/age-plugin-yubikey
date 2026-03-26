@@ -1,4 +1,4 @@
-use dialoguer::Password;
+use age_core::secrecy::ExposeSecret;
 use rand::{rngs::OsRng, RngCore};
 use x509::RelativeDistinguishedName;
 use yubikey::{
@@ -12,6 +12,7 @@ use crate::{
     fl,
     key::{self, Stub},
     piv_p256,
+    prompt::{self, SecretRequest},
     util::{Metadata, POLICY_EXTENSION_OID},
     Recipient, BINARY_NAME, USABLE_SLOTS,
 };
@@ -122,14 +123,18 @@ impl IdentityBuilder {
 
         if let PinPolicy::Always = pin_policy {
             // We need to enter the PIN again.
-            let pin = Password::new()
-                .with_prompt(fl!(
-                    "plugin-enter-pin",
-                    yubikey_serial = yubikey.serial().to_string(),
-                ))
-                .report(true)
-                .interact()?;
-            yubikey.verify_pin(pin.as_bytes())?;
+            let enter_pin = fl!(
+                "plugin-enter-pin",
+                yubikey_serial = yubikey.serial().to_string()
+            );
+            let pin_prompt = fl!("pinentry-prompt-pin");
+            let pin = prompt::request_secret_cli(&SecretRequest {
+                title: prompt::pin_title(),
+                description: &enter_pin,
+                prompt: &pin_prompt,
+                error: None,
+            })?;
+            yubikey.verify_pin(pin.expose_secret().as_bytes())?;
         }
         if let TouchPolicy::Never = touch_policy {
             // No need to touch YubiKey

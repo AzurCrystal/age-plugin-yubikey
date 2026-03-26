@@ -28,6 +28,7 @@ pub enum Error {
     NoEmptySlots(Serial),
     NoMatchingSerial(Serial),
     PukLocked,
+    SecretInputCancelled,
     SlotHasNoIdentity(RetiredSlotId),
     SlotIsNotEmpty(RetiredSlotId),
     TimedOut,
@@ -114,6 +115,7 @@ impl fmt::Debug for Error {
                 wlnfl!(f, "err-no-matching-serial", serial = serial.to_string())?
             }
             Error::PukLocked => wlnfl!(f, "err-yk-pin-locked", pin_kind = "PUK")?,
+            Error::SecretInputCancelled => wlnfl!(f, "err-secret-input-cancelled")?,
             Error::SlotHasNoIdentity(slot) => {
                 wlnfl!(f, "err-slot-has-no-identity", slot = slot_to_ui(slot))?
             }

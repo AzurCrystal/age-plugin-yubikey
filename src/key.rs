@@ -3,9 +3,7 @@
 use age_core::secrecy::{ExposeSecret, SecretString};
 use age_plugin::{identity, Callbacks};
 use bech32::{ToBase32, Variant};
-use dialoguer::Password;
 use log::{debug, error, warn};
-use std::convert::Infallible;
 use std::fmt;
 use std::io;
 use std::iter;
@@ -21,6 +19,7 @@ use yubikey::{
 use crate::{
     error::Error,
     fl, piv_p256,
+    prompt::{self, PluginPromptError, SecretRequest},
     recipient::TAG_BYTES,
     util::{otp_serial_prefix, Metadata},
     Recipient, IDENTITY_PREFIX,
@@ -269,28 +268,27 @@ pub(crate) fn disconnect_without_reset(yubikey: YubiKey) {
     let _ = yubikey.disconnect(pcsc::Disposition::LeaveCard);
 }
 
-fn request_pin<E, E2>(
-    mut prompt: impl FnMut(Option<String>) -> Result<Result<SecretString, E>, E2>,
+fn request_pin<E2>(
+    mut prompt: impl FnMut(Option<&str>) -> Result<SecretString, E2>,
     serial: Serial,
-) -> Result<Result<SecretString, E>, E2> {
+) -> Result<SecretString, E2> {
     let mut prev_error = None;
     loop {
-        prev_error = Some(match prompt(prev_error)? {
-            Ok(pin) => match pin.expose_secret().len() {
-                // A PIN must be between 6 and 8 characters.
-                6..=8 => break Ok(Ok(pin)),
-                // If the string is 44 bytes and starts with the YubiKey's serial
-                // encoded as 12-byte modhex, the user probably touched the YubiKey
-                // early and "typed" an OTP.
-                44 if pin.expose_secret().starts_with(&otp_serial_prefix(serial)) => {
-                    fl!("plugin-err-accidental-touch")
-                }
-                // Otherwise, the PIN is either too short or too long.
-                0..=5 => fl!("plugin-err-pin-too-short"),
-                _ => fl!("plugin-err-pin-too-long"),
-            },
-            Err(e) => break Ok(Err(e)),
+        prev_error = Some(match validate_pin(prompt(prev_error.as_deref())?, serial) {
+            Ok(pin) => break Ok(pin),
+            Err(err) => err,
         });
+    }
+}
+
+fn validate_pin(pin: SecretString, serial: Serial) -> Result<SecretString, String> {
+    match pin.expose_secret().len() {
+        6..=8 => Ok(pin),
+        44 if pin.expose_secret().starts_with(&otp_serial_prefix(serial)) => {
+            Err(fl!("plugin-err-accidental-touch"))
+        }
+        0..=5 => Err(fl!("plugin-err-pin-too-short")),
+        _ => Err(fl!("plugin-err-pin-too-long")),
     }
 }
 
@@ -299,39 +297,51 @@ pub(crate) fn manage(yubikey: &mut YubiKey) -> Result<(), Error> {
     const DEFAULT_PUK: &str = "12345678";
 
     eprintln!();
-    let pin = Password::new()
-        .with_prompt(fl!(
-            "mgr-enter-pin",
-            yubikey_serial = yubikey.serial().to_string(),
-            default_pin = DEFAULT_PIN,
-        ))
-        .report(true)
-        .interact()?;
-    yubikey.verify_pin(pin.as_bytes())?;
+    let enter_pin = fl!(
+        "mgr-enter-pin",
+        yubikey_serial = yubikey.serial().to_string(),
+        default_pin = DEFAULT_PIN,
+    );
+    let pin_prompt = fl!("pinentry-prompt-pin");
+    let pin = prompt::request_secret_cli(&SecretRequest {
+        title: prompt::pin_title(),
+        description: &enter_pin,
+        prompt: &pin_prompt,
+        error: None,
+    })?;
+    yubikey.verify_pin(pin.expose_secret().as_bytes())?;
 
     // If the user is using the default PIN, help them to change it.
-    if pin == DEFAULT_PIN {
+    if pin.expose_secret() == DEFAULT_PIN {
         eprintln!();
         eprintln!("{}", fl!("mgr-change-default-pin"));
         eprintln!();
-        let current_puk = Password::new()
-            .with_prompt(fl!("mgr-enter-current-puk", default_puk = DEFAULT_PUK))
-            .interact()?;
+        let enter_puk = fl!("mgr-enter-current-puk", default_puk = DEFAULT_PUK);
+        let puk_prompt = fl!("pinentry-prompt-puk");
+        let current_puk = prompt::request_secret_cli(&SecretRequest {
+            title: prompt::pin_title(),
+            description: &enter_puk,
+            prompt: &puk_prompt,
+            error: None,
+        })?;
         let new_pin = loop {
+            let choose_pin = fl!("mgr-choose-new-pin");
+            let new_pin_prompt = fl!("pinentry-prompt-new-pin");
             let pin = request_pin(
                 |prev_error| {
-                    if let Some(err) = prev_error {
-                        eprintln!("{err}");
-                    }
-                    Password::new()
-                        .with_prompt(fl!("mgr-choose-new-pin"))
-                        .with_confirmation(fl!("mgr-repeat-new-pin"), fl!("mgr-pin-mismatch"))
-                        .interact()
-                        .map(|pin| Result::<_, Infallible>::Ok(SecretString::from(pin)))
+                    prompt::request_secret_with_confirmation_cli(
+                        &SecretRequest {
+                            title: prompt::pin_title(),
+                            description: &choose_pin,
+                            prompt: &new_pin_prompt,
+                            error: prev_error,
+                        },
+                        &fl!("mgr-repeat-new-pin"),
+                        &fl!("mgr-pin-mismatch"),
+                    )
                 },
                 yubikey.serial(),
-            )?
-            .unwrap();
+            )?;
             if pin.expose_secret() == DEFAULT_PIN {
                 eprintln!("{}", fl!("mgr-nope-default-pin"));
             } else {
@@ -340,13 +350,13 @@ pub(crate) fn manage(yubikey: &mut YubiKey) -> Result<(), Error> {
         };
         let new_pin = new_pin.expose_secret();
         yubikey
-            .change_puk(current_puk.as_bytes(), new_pin.as_bytes())
+            .change_puk(current_puk.expose_secret().as_bytes(), new_pin.as_bytes())
             .map_err(|e| match e {
                 yubikey::Error::PinLocked => Error::PukLocked,
                 yubikey::Error::WrongPin { tries } => Error::WrongPuk(tries),
                 _ => Error::YubiKey(e),
             })?;
-        yubikey.change_pin(pin.as_bytes(), new_pin.as_bytes())?;
+        yubikey.change_pin(pin.expose_secret().as_bytes(), new_pin.as_bytes())?;
     }
 
     match MgmKey::get_protected(yubikey) {
@@ -381,6 +391,43 @@ pub(crate) fn manage(yubikey: &mut YubiKey) -> Result<(), Error> {
     }
 
     Ok(())
+}
+
+fn request_pin_plugin<E>(
+    callbacks: &mut dyn Callbacks<E>,
+    serial: Serial,
+) -> io::Result<Result<SecretString, identity::Error>> {
+    let prompt_text = fl!("plugin-enter-pin", yubikey_serial = serial.to_string());
+    let pin_prompt = fl!("pinentry-prompt-pin");
+    let mut prev_error = None;
+
+    loop {
+        let pin = match prompt::request_secret_plugin(
+            &SecretRequest {
+                title: prompt::pin_title(),
+                description: &prompt_text,
+                prompt: &pin_prompt,
+                error: prev_error.as_deref(),
+            },
+            callbacks,
+        )? {
+            Ok(pin) => pin,
+            Err(PluginPromptError::Cancelled) => {
+                return Ok(Err(identity::Error::Identity {
+                    index: 0,
+                    message: fl!(
+                        "plugin-err-pin-required",
+                        yubikey_serial = serial.to_string()
+                    ),
+                }))
+            }
+        };
+
+        match validate_pin(pin, serial) {
+            Ok(pin) => return Ok(Ok(pin)),
+            Err(err) => prev_error = Some(err),
+        }
+    }
 }
 
 /// Returns an iterator of keys that are occupying plugin-compatible slots, along with the
@@ -661,29 +708,13 @@ impl Connection {
         }
 
         // The policy requires a PIN, so request it.
-        let pin = match request_pin(
-            |prev_error| {
-                callbacks.request_secret(&format!(
-                    "{}{}{}",
-                    prev_error.as_deref().unwrap_or(""),
-                    prev_error.as_deref().map(|_| " ").unwrap_or(""),
-                    fl!(
-                        "plugin-enter-pin",
-                        yubikey_serial = self.yubikey.serial().to_string(),
-                    )
-                ))
-            },
-            self.yubikey.serial(),
-        )? {
+        let pin = match request_pin_plugin(callbacks, self.yubikey.serial())? {
             Ok(pin) => pin,
-            Err(_) => {
-                return Ok(Err(identity::Error::Identity {
-                    index: self.identity_index,
-                    message: fl!(
-                        "plugin-err-pin-required",
-                        yubikey_serial = self.yubikey.serial().to_string(),
-                    ),
-                }))
+            Err(mut err) => {
+                if let identity::Error::Identity { index, .. } = &mut err {
+                    *index = self.identity_index;
+                }
+                return Ok(Err(err));
             }
         };
         if let Err(e) = self.yubikey.verify_pin(pin.expose_secret().as_bytes()) {

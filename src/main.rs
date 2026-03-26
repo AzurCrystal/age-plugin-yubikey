@@ -19,6 +19,7 @@ mod error;
 mod key;
 mod piv_p256;
 mod plugin;
+mod prompt;
 mod util;
 
 mod recipient;

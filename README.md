@@ -145,6 +145,12 @@ likely be implemented as a separate age plugin that interacts with
 [`yubikey-agent`](https://github.com/FiloSottile/yubikey-agent), enabling
 YubiKeys to be used simultaneously with age and SSH.
 
+### PIN prompts
+
+On Linux desktop environments, `age-plugin-yubikey` will attempt to use
+`pinentry` for PIN / PUK prompts. If no desktop session is detected, or if
+`pinentry` is not available, it falls back to terminal prompts.
+
 ### Manual setup and technical details
 
 `age-plugin-yubikey` only officially supports the following YubiKey variants,
@@ -188,4 +194,3 @@ Unless you explicitly state otherwise, any contribution intentionally
 submitted for inclusion in the work by you, as defined in the Apache-2.0
 license, shall be dual licensed as above, without any additional terms or
 conditions.
-

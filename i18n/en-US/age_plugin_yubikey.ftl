@@ -27,6 +27,10 @@
 
 ## YubiKey metadata
 
+pinentry-prompt-pin      = PIN:
+pinentry-prompt-puk      = PUK:
+pinentry-prompt-new-pin  = New PIN:
+
 pin-policy-always = Always (A PIN is required for every decryption, if set)
 pin-policy-once   = Once   (A PIN is required once per session, if set)
 pin-policy-never  = Never  (A PIN is NOT required to decrypt)
@@ -206,6 +210,7 @@ err-invalid-slot         = Invalid slot '{$slot}' (expected number between 1 and
 err-invalid-touch-policy = Invalid touch policy '{$policy}' (expected [{$expected}]).
 err-io-user              = Failed to get input from user: {$err}
 err-io                   = Failed to set up {-yubikey}: {$err}
+err-secret-input-cancelled = Secret entry was cancelled.
 err-multiple-commands    = Only one of {-cmd-generate}, {-cmd-identity}, {-cmd-list}, {-cmd-list-all} can be specified.
 err-multiple-yubikeys    = Multiple {-yubikeys} are plugged in. Use {-flag-serial} to select a single {-yubikey}.
 err-no-empty-slots       = {-yubikey} with serial {$serial} has no empty slots.
